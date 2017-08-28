@@ -45,13 +45,15 @@ class empca():
                     break
                 print 'after if'
                 i += 1
-            print 'after lalla'
+            print 'after lala'
             self.Mod_A -= np.outer(np.dot(self.Mod_A, self.V[:,j]),  self.V[:,j].T)
             print 'blalb blabla fdg fdg '
             j += 1
 
         alpha = np.dot(self.V.T, self.A.T)
-        self.S, eigVe = np.linalg.eig(np.cov(alpha))
+        print 'cha cha cha: ', np.cov(alpha)
+        temp = np.cov(alpha)
+        self.S, eigVe = np.linalg.eigh(np.dot(0.02, temp))
         print 'fdfd'
         print eigVe
         print self.V
