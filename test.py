@@ -28,7 +28,7 @@ def reconstructImageFromPCAModel(immean, path, dim, m, n, V):
     return testIm.ravel(), guessX, error
 
 def PCAwithDeviation(V, S, dim, immean, m , n, sigma):
-    figure('PCA vectors with mean')
+    figure('PCA vectors with mean' + `sigma`)
     for i in range(0, dim):
         #subplot(4, np.ceil(dim/4).astype(np.int)+1, i + 1)
         subplot(2, 2, i + 1)
