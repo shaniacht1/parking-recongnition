@@ -4,27 +4,28 @@ from pylab import *
 from pylab import plt
 import pca
 import glob
+import utils
+
 def checkEqual(orig, new):
     return np.allclose(orig, new)
 
-def showReconstruction(orig, guess,m,n):
+def showReconstruction(orig, guess,error,m,n):
     figure('Original image vs. reconstructed image')
     subplot(1, 2, 1)
     imshow(orig.astype(np.uint8))
     subplot(1, 2, 2)
     imshow(guess.astype(np.uint8).reshape(m, n, -1))
-    #plt.show()
+    figure('Reconstruction error visualization')
+    imshow(error.astype(np.uint8).reshape(m, n, -1))
 
 def reconstructImageFromPCAModel(immean, path, dim, m, n, V):
-    testIm = plt.imread(path).astype(np.float)
+    testIm = utils.straightenImage(plt.imread(path)).astype(np.float)
     V = V[:dim]
-    print immean.shape
-    print testIm.ravel().shape
-    print V.shape
+
     alpha = np.dot(V, (testIm.ravel() - immean))
     guessX = immean + np.dot(np.transpose(V), alpha)
-    showReconstruction(testIm, guessX, m,n)
     error = testIm.ravel() - guessX
+    showReconstruction(testIm, guessX, error, m,n)
     return testIm.ravel(), guessX, error
 
 def PCAwithDeviation(V, S, dim, immean, m , n, sigma):
