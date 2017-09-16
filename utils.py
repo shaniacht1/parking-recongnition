@@ -37,3 +37,72 @@ def straightenImage(im_src):
     # cv2.waitKey(0)
 
     # finish test homogrpahy
+
+def recDetection(img, blank):
+    print 'fff',blank.shape
+    print 'ffff', img.shape
+    gray = cv2.cvtColor(blank, cv2.COLOR_BGR2GRAY)
+    gray = cv2.blur(gray, (3, 3))
+    #gray = cv2.GaussianBlur(gray, (1, 3), 0)
+    # recognize less, but less shtuyot (more accurTE)
+    ret3, edges = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # recognize more, but more shtuyot
+    #edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    boundRect = []
+    polygons = []
+    for i, cont in enumerate(contours):
+        # poly = cv2.approxPolyDP(cont, 3, True)
+        # polygons.append(poly)
+        x, y, w, h = cv2.boundingRect(cont)
+        if w < 200 and w > 100 and h > 20 and h < 60:
+            cv2.rectangle(img, (x,y),(x+w, y+h), (0, 255, 0), 2)
+    cv2.drawContours(img, contours, -1, (0, 0, 0), 1)
+    cv2.imshow("cha cha", img)
+    cv2.waitKey(0)
+
+def lineDetection(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.blur(gray, (3, 3))
+    #_, edges = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+    edges = cv2.Canny(gray, 100, 300, apertureSize=3)
+
+    minLineLength = 100
+    maxLineGap = 0.1
+
+    print img.shape
+    blank = np.zeros(img.shape, dtype=np.uint8)
+    lines = cv2.HoughLinesP(edges, 30, np.pi / 180, 20, minLineLength, maxLineGap)
+    for x1, y1, x2, y2 in lines[0]:
+        cv2.line(blank, (x1, y1), (x2, y2), (0, 150, 0), 1)
+
+    '''
+    lines = cv2.HoughLines(edges, 1, np.pi / 180, 125)
+    for rho, theta in lines[0]:
+        a = np.cos(theta)
+        b = np.sin(theta)
+        x0 = a * rho
+        y0 = b * rho
+        x1 = int(x0 + 1000 * (-b))
+        y1 = int(y0 + 1000 * (a))
+        x2 = int(x0 - 1000 * (-b))
+        y2 = int(y0 - 1000 * (a))
+
+        cv2.line(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+    '''
+    # cv2.imshow("cha cha",blank)
+    # cv2.waitKey(0)
+    return blank
+
+def mergeLines(lines):
+    _lines = []
+    for _line in lines[0]:
+        _lines.append([(_line[0], _line[1]), (_line[2], _line[3])])
+
+    _lines = sorted(_lines, key=lambda _line: _line[0][0])
+
+    merged_lines = merge_lines_pipeline(_lines)
+    print("process lines", len(lines), len(merged_lines))
+    img_merged_lines = mpimg.imread(image_src)
+    for line in merged_lines:
+        cv2.line(img_merged_lines, (line[0][0], line[0][1]), (line[1][0], line[1][1]), (0, 0, 255), 6)

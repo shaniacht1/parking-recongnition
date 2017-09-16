@@ -16,6 +16,7 @@ def showReconstruction(orig, guess,error,m,n):
     subplot(1, 2, 2)
     imshow(guess.astype(np.uint8).reshape(m, n, -1))
     figure('Reconstruction error visualization')
+    #  plt.colorbar?
     imshow(error.astype(np.uint8).reshape(m, n, -1))
 
 def reconstructImageFromPCAModel(immean, path, dim, m, n, V):
@@ -23,8 +24,8 @@ def reconstructImageFromPCAModel(immean, path, dim, m, n, V):
     V = V[:dim]
 
     alpha = np.dot(V, (testIm.ravel() - immean))
-    guessX = immean + np.dot(np.transpose(V), alpha)
-    error = testIm.ravel() - guessX
+    guessX = np.abs(immean + np.dot(np.transpose(V), alpha))
+    error = np.abs(testIm.ravel() - guessX)
     showReconstruction(testIm, guessX, error, m,n)
     return testIm.ravel(), guessX, error
 
