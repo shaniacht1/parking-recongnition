@@ -6,6 +6,7 @@ import pca
 import glob
 sys.path.append('/Users/shaniacht/anaconda/lib/python2.7/site-packages')
 import cv2
+from skimage import feature, color
 
 def getImagesFromDir(path):
     imlist = []
@@ -94,15 +95,12 @@ def lineDetection(img):
     # cv2.waitKey(0)
     return blank
 
-def mergeLines(lines):
-    _lines = []
-    for _line in lines[0]:
-        _lines.append([(_line[0], _line[1]), (_line[2], _line[3])])
+def parkingPercents(orig_img,x,y,h,w,thresh):
 
-    _lines = sorted(_lines, key=lambda _line: _line[0][0])
-
-    merged_lines = merge_lines_pipeline(_lines)
-    print("process lines", len(lines), len(merged_lines))
-    img_merged_lines = mpimg.imread(image_src)
-    for line in merged_lines:
-        cv2.line(img_merged_lines, (line[0][0], line[0][1]), (line[1][0], line[1][1]), (0, 0, 255), 6)
+    gray = cv2.cvtColor(orig_img.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+    img = gray[y:y + h, x:x + w]
+    _, bin_img = cv2.threshold(img, thresh, 255, cv2.THRESH_BINARY)
+    plt.imshow(bin_img)
+    count = cv2.countNonZero(bin_img)
+    plt.show()
+    return count
