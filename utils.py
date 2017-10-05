@@ -6,14 +6,17 @@ import pca
 import glob
 sys.path.append('/Users/shaniacht/anaconda/lib/python2.7/site-packages')
 import cv2
-from skimage import feature, color
+from skimage.measure import ransac, LineModelND
+from skimage.morphology import skeletonize
+from skimage.measure import ransac, LineModelND
+from skimage import feature
+import statistics
 
 def getImagesFromDir(path):
     imlist = []
     for filename in glob.glob(path):
         imlist.append(filename)
     return imlist
-
 
 def getDataMatrix(imlist):
     L = []
@@ -28,16 +31,9 @@ def straightenImage(im_src):
     # pts_dst = np.array([[346, 323], [518, 323], [346, 377],[518, 377]]).astype(np.float)
     pts_dst = np.array([[485, 475], [620, 475], [485, 510], [620, 510]]).astype(np.float)
 
-    h, status = cv2.findHomography(pts_src, pts_dst)
-
+    h, mask = cv2.findHomography(pts_src, pts_dst)
     im_dst = cv2.warpPerspective(im_src, h, (im_src.shape[1], im_src.shape[0]))
     return im_dst
-
-    # cv2.imshow("Source Image", im_src)
-    # cv2.imshow("Destination Image", im_dst)
-    # cv2.waitKey(0)
-
-    # finish test homogrpahy
 
 def recDetection(img, blank):
     print 'fff',blank.shape
@@ -62,41 +58,193 @@ def recDetection(img, blank):
     cv2.imshow("cha cha", img)
     cv2.waitKey(0)
 
+def inliers_around_point(skeleton, x, y, win_w, win_h):
+    # print 'this is y: ',round(y)
+    # print 'this is win_h: ', win_h
+    y = int(round(y))
+    # print len(skeleton)
+    m, n = 740, 1024
+    # print 'this is m,n: ', m,n
+    x1 = max(0, x-win_w)
+    x2 = min(n-1, x+win_w)
+    y1 = max(0, y-win_h)
+    y2 = min(m-1, y+win_h)
+    # print x1 , x2, y1, y2
+    # window_area = np.abs((x1-x2)*(y1-y2))
+    cur_window = skeleton[y1 : y2, x1 : x2]
+    # plt.imshow(cur_window)
+    # plt.show()
+    # print 'nonzero in window:', count_nonzero(cur_window)
+    return count_nonzero(cur_window)
+
+def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
+    print 'crop lines started'
+    print 'x shape is: ', x.shape[0]
+    i = win_w
+    cropped = []
+    suspicious_count = 0
+    suspicious_inter = 0
+    start_x = -1
+    end_x = -1
+    isLine = False
+    #initialization
+    inliers_count = inliers_around_point(skeleton, x[win_w], y[win_w], win_w, win_h)
+    if inliers_count > win_w*2-5:
+        print 'line started', 0
+        isLine = True
+        start_x = 0
+    # find line crops:
+    # for i in range(win_w, x.shape[0]):
+    while i < x.shape[0]:
+        # print i
+        inliers_count = inliers_around_point(skeleton, x[i], int(y[i]), win_w, win_h) > (win_w*2-5)
+        if isLine:
+            if inliers_count:
+                suspicious_count = 0
+                inter_count = inliers_around_point(skeleton, x[i], int(y[i]), 5, 20)
+                if inter_count > 30:
+                    suspicious_inter+=1
+                    if suspicious_inter > 5:
+                        suspicious_inter = 0
+                        print 'found intersection'
+                        # remove short lines
+                        if x[i] - start_x > 50:
+                            cropped.append((model_robust, start_x, x[i], y[0]))
+                        start_x = x[i] + 5
+                        i += 5
+                else:
+                    suspicious_inter = 0
+            else:
+                suspicious_count+=1
+                if suspicious_count >= win_w:
+                    print 'line finished', x[i]
+                    suspicious_count = 0
+                    if x[i] - start_x > 50:
+                        cropped.append((model_robust, start_x, x[i]-win_w, y[0]))
+                    isLine = False
+        else:
+            if inliers_count:
+                suspicious_count += 1
+                if suspicious_count >= win_w:
+                    print 'line started', x[i]
+                    suspicious_count = 0
+                    start_x = x[i]-win_w
+                    isLine = True
+            else:
+                suspicious_count = 0
+        i+=1
+    if isLine:
+        cropped.append((model_robust, start_x, x.shape-1, y[0]))
+    return cropped
+
+def findIntersections(hor_lines, ver_lines):
+    return hor_lines
+
 def lineDetection(img):
+    print 'img size: ', img.shape
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.blur(gray, (3, 3))
-    #_, edges = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
-    edges = cv2.Canny(gray, 100, 300, apertureSize=3)
+    edges = feature.canny(gray, sigma=3)
+    blur_edges = cv2.blur((edges * 255).astype(np.uint8), (9, 9))
+    _, bin_edges = cv2.threshold(blur_edges, 127, 255, cv2.THRESH_OTSU)
+    bin_edges = bin_edges > 0
+    skeleton = skeletonize(bin_edges.astype(np.uint8))
+    edge_pts = np.array(np.nonzero(skeleton), dtype=float).T
+    edge_pts_xy = edge_pts[:, ::-1]
 
-    minLineLength = 100
-    maxLineGap = 0.1
+    points_per_line = []
+    hor_lines = []
+    ver_lines = []
 
-    print img.shape
-    blank = np.zeros(img.shape, dtype=np.uint8)
-    lines = cv2.HoughLinesP(edges, 30, np.pi / 180, 20, minLineLength, maxLineGap)
-    for x1, y1, x2, y2 in lines[0]:
-        cv2.line(blank, (x1, y1), (x2, y2), (0, 150, 0), 1)
+    # get all lines in array
+    # model_robust.predict - might be useful to find intersections
+    for i in range(21):
+        model_robust, inliers = ransac(edge_pts_xy, LineModelND, min_samples=2, residual_threshold=10, max_trials=1000)
+        points_per_line += [inliers]
 
-    '''
-    lines = cv2.HoughLines(edges, 1, np.pi / 180, 125)
-    for rho, theta in lines[0]:
-        a = np.cos(theta)
-        b = np.sin(theta)
-        x0 = a * rho
-        y0 = b * rho
-        x1 = int(x0 + 1000 * (-b))
-        y1 = int(y0 + 1000 * (a))
-        x2 = int(x0 - 1000 * (-b))
-        y2 = int(y0 - 1000 * (a))
+        x1 = np.arange(1024)
+        y1 = model_robust.predict_y(x1)
+        y2 = np.arange(768)
+        x2 = model_robust.predict_x(y2)
+        # this is a vertical line
+        if np.abs(y1[0] - y1[-1]) > 730 and np.abs(x2[0] - x2[-1]) < 20:
+            ver_lines.append((model_robust, np.abs(x2[0] - x2[-1])/2))
+        # this is a horizontal line
+        if np.abs(y1[0] - y1[-1]) < 50 and np.abs(x2[0] - x2[-1]) > 1000:
+            cur_lines = crop_lines(model_robust, skeleton, x1, y1, 10, 10)
+            figure('dd')
+            plt.scatter([x[1] for x in cur_lines], [x[3] for x in cur_lines], c="g")
+            plt.scatter([x[2] for x in cur_lines], [x[3] for x in cur_lines], c="r")
+            hor_lines+=cur_lines
+        edge_pts_xy = edge_pts_xy[~inliers]
 
-        cv2.line(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-    '''
-    # cv2.imshow("cha cha",blank)
-    # cv2.waitKey(0)
-    return blank
+    # hor_lines = findIntersections(hor_lines, ver_lines)
+    plt.imshow(skeleton)
+    return hor_lines, ver_lines
+
+def y_value(line):
+    return line[3]
+
+def x_start_value(line):
+    return line[1]
+
+def x_end_value(line):
+    return line[2]
+
+def areNeigbours(line1, line2):
+    if not line1 or not line2:
+        return False
+    x11 = x_start_value(line1)
+    x12 = x_end_value(line1)
+    x21 =  x_start_value(line2)
+    x22 = x_end_value(line2)
+    return np.abs(x11-x21) < 30 and np.abs(x12-x22)
+
+def find_parkings(img):
+    hor_lines, ver_lines = lineDetection(img)
+    sorted_hor_lines = sorted(sorted(hor_lines, key=y_value), key=x_start_value)
+    parkings = []
+    i=0
+    prev_line = sorted_hor_lines[0]
+    prev_model = prev_line[0]
+    y_values = prev_model.predict_y([x_start_value(prev_line), x_end_value(prev_line)])
+    prev_points = [(x_start_value(prev_line), y_values[0]),(x_end_value(prev_line),y_values[1])]
+    while i<len(sorted_hor_lines):
+        cur_line = sorted_hor_lines[i]
+        cur_model = cur_line[0]
+        cur_x_start = x_start_value(cur_line)
+        cur_x_end = x_end_value(cur_line)
+        if i < len(sorted_hor_lines) - 1:
+            next_line = sorted_hor_lines[i+1]
+            is_next_neig = areNeigbours(cur_line, next_line)
+        is_prev_neig = areNeigbours(cur_line, prev_line)
+        #  is_prev_neig &&  is_next_neig => line in the middle of row
+        #  is_prev_neig && !is_next_neig => line last of row
+        # !is_prev_neig &&  is_next_neig => line first of row
+        # !is_prev_neig && !is_next_neig => not a parking!
+        if is_prev_neig:
+            if is_next_neig:
+                cur_x1 = statistics.median([prev_points[0][0],cur_x_start,x_start_value(next_line)])
+                cur_x2 = statistics.median([prev_points[1][0],cur_x_end,x_end_value(next_line)])
+            else:
+                cur_x1 = cur_x_start if np.abs(prev_points[0][0]-cur_x_start) < 5  else prev_points[0][0]
+                cur_x2 = cur_x_end if np.abs(prev_points[1][0]-cur_x_start) < 5  else prev_points[1][0]
+        else:
+            if is_next_neig:
+                cur_x1 = cur_x_start
+                cur_x2 = cur_x_end
+            else:
+                cur_line = None
+        y_values = cur_model.predict_y([cur_x1, cur_x2])
+        cur_points = [(cur_x1, y_values[0]), (cur_x2, y_values[1])]
+        if is_prev_neig:
+            parkings.append(cur_points + prev_points)
+        prev_line = cur_line
+        prev_points = cur_points
+        i+=1
+    print parkings
+    return parkings
 
 def parkingPercents(orig_img,x,y,h,w,thresh):
-
     gray = cv2.cvtColor(orig_img.astype(np.uint8), cv2.COLOR_BGR2GRAY)
     img = gray[y:y + h, x:x + w]
     _, bin_img = cv2.threshold(img, thresh, 255, cv2.THRESH_BINARY)
