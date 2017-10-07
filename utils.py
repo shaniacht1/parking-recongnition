@@ -11,6 +11,9 @@ from skimage.morphology import skeletonize
 from skimage.measure import ransac, LineModelND
 from skimage import feature
 import statistics
+import pickle
+import math
+import Line
 
 def getImagesFromDir(path):
     imlist = []
@@ -80,6 +83,7 @@ def inliers_around_point(skeleton, x, y, win_w, win_h):
 def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
     print 'crop lines started'
     print 'x shape is: ', x.shape[0]
+    print 'y shape is: ', y.shape[0]
     i = win_w
     cropped = []
     suspicious_count = 0
@@ -97,7 +101,7 @@ def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
     # for i in range(win_w, x.shape[0]):
     while i < x.shape[0]:
         # print i
-        inliers_count = inliers_around_point(skeleton, x[i], int(y[i]), win_w, win_h) > (win_w*2-5)
+        inliers_count = inliers_around_point(skeleton, i, int(y[i]), win_w, win_h) > (win_w*2-5)
         if isLine:
             if inliers_count:
                 suspicious_count = 0
@@ -106,10 +110,10 @@ def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
                     suspicious_inter+=1
                     if suspicious_inter > 5:
                         suspicious_inter = 0
-                        print 'found intersection'
+                        print 'found intersection', i, i, y[start_x]
                         # remove short lines
-                        if x[i] - start_x > 50:
-                            cropped.append((model_robust, start_x, x[i], y[0]))
+                        if i - start_x > 50:
+                            cropped.append((model_robust, start_x, i, y[start_x], y[i]))
                         start_x = x[i] + 5
                         i += 5
                 else:
@@ -117,24 +121,24 @@ def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
             else:
                 suspicious_count+=1
                 if suspicious_count >= win_w:
-                    print 'line finished', x[i]
+                    print 'line finished', i, i, y[start_x]
                     suspicious_count = 0
-                    if x[i] - start_x > 50:
-                        cropped.append((model_robust, start_x, x[i]-win_w, y[0]))
+                    if x[i] - start_x > 100:
+                        cropped.append((model_robust, start_x, i-win_w, y[start_x], y[i-win_w]))
                     isLine = False
         else:
             if inliers_count:
                 suspicious_count += 1
                 if suspicious_count >= win_w:
-                    print 'line started', x[i]
+                    print 'line started', i, x[i], y[start_x]
                     suspicious_count = 0
-                    start_x = x[i]-win_w
+                    start_x = i-win_w
                     isLine = True
             else:
                 suspicious_count = 0
         i+=1
     if isLine:
-        cropped.append((model_robust, start_x, x.shape-1, y[0]))
+        cropped.append((model_robust, start_x, x.shape-1, y[start_x], y[x.shape-1]))
     return cropped
 
 def findIntersections(hor_lines, ver_lines):
@@ -170,14 +174,13 @@ def lineDetection(img):
             ver_lines.append((model_robust, np.abs(x2[0] - x2[-1])/2))
         # this is a horizontal line
         if np.abs(y1[0] - y1[-1]) < 50 and np.abs(x2[0] - x2[-1]) > 1000:
+            # hor_lines += [(model_robust, x1, y1)]
             cur_lines = crop_lines(model_robust, skeleton, x1, y1, 10, 10)
             figure('dd')
             plt.scatter([x[1] for x in cur_lines], [x[3] for x in cur_lines], c="g")
             plt.scatter([x[2] for x in cur_lines], [x[3] for x in cur_lines], c="r")
-            hor_lines+=cur_lines
+            hor_lines += cur_lines
         edge_pts_xy = edge_pts_xy[~inliers]
-
-    # hor_lines = findIntersections(hor_lines, ver_lines)
     plt.imshow(skeleton)
     return hor_lines, ver_lines
 
@@ -197,20 +200,24 @@ def areNeigbours(line1, line2):
     x12 = x_end_value(line1)
     x21 =  x_start_value(line2)
     x22 = x_end_value(line2)
-    return np.abs(x11-x21) < 30 and np.abs(x12-x22)
+    return np.abs(x11-x21) < 30 and np.abs(x12-x22) and np.abs(line1[3] - line2[3]) < 50
+
+def special_x_sort(line):
+    x = x_start_value(line)
+    return int(math.ceil(x / 100.0)) * 100
 
 def find_parkings(img):
     hor_lines, ver_lines = lineDetection(img)
-    sorted_hor_lines = sorted(sorted(hor_lines, key=y_value), key=x_start_value)
+    sorted_hor_lines = sorted(sorted(hor_lines, key=y_value), key=special_x_sort)
     parkings = []
     i=0
     prev_line = sorted_hor_lines[0]
     prev_model = prev_line[0]
     y_values = prev_model.predict_y([x_start_value(prev_line), x_end_value(prev_line)])
-    prev_points = [(x_start_value(prev_line), y_values[0]),(x_end_value(prev_line),y_values[1])]
+    prev_points = [(x_start_value(prev_line), int(y_values[0])),(x_end_value(prev_line),int(y_values[1]))]
+    print sorted_hor_lines
     while i<len(sorted_hor_lines):
         cur_line = sorted_hor_lines[i]
-        cur_model = cur_line[0]
         cur_x_start = x_start_value(cur_line)
         cur_x_end = x_end_value(cur_line)
         if i < len(sorted_hor_lines) - 1:
@@ -234,21 +241,23 @@ def find_parkings(img):
                 cur_x2 = cur_x_end
             else:
                 cur_line = None
-        y_values = cur_model.predict_y([cur_x1, cur_x2])
-        cur_points = [(cur_x1, y_values[0]), (cur_x2, y_values[1])]
+                cur_x1 = -1000
+                cur_x2 = -1000
+        if cur_line:
+            cur_points = [(cur_x1, int(cur_line[3])), (cur_x2, int(cur_line[4]))]
+        else:
+            cur_points = [(cur_x1, -1000), (cur_x2, -1000)]
         if is_prev_neig:
             parkings.append(cur_points + prev_points)
         prev_line = cur_line
         prev_points = cur_points
         i+=1
-    print parkings
-    return parkings
 
-def parkingPercents(orig_img,x,y,h,w,thresh):
-    gray = cv2.cvtColor(orig_img.astype(np.uint8), cv2.COLOR_BGR2GRAY)
-    img = gray[y:y + h, x:x + w]
-    _, bin_img = cv2.threshold(img, thresh, 255, cv2.THRESH_BINARY)
-    plt.imshow(bin_img)
-    count = cv2.countNonZero(bin_img)
-    plt.show()
-    return count
+    print len(sorted_hor_lines)
+    print parkings
+
+    pickle_out = open("parking_array.pickle","wb")
+    pickle.dump(parkings, pickle_out)
+    pickle_out.close()
+
+    return parkings
