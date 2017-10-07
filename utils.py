@@ -13,7 +13,7 @@ from skimage import feature
 import statistics
 import pickle
 import math
-import Line
+from Line import Line
 
 def getImagesFromDir(path):
     imlist = []
@@ -91,6 +91,7 @@ def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
     start_x = -1
     end_x = -1
     isLine = False
+
     #initialization
     inliers_count = inliers_around_point(skeleton, x[win_w], y[win_w], win_w, win_h)
     if inliers_count > win_w*2-5:
@@ -110,10 +111,13 @@ def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
                     suspicious_inter+=1
                     if suspicious_inter > 5:
                         suspicious_inter = 0
-                        print 'found intersection', i, i, y[start_x]
+                        print 'found intersection', i, y[i]
                         # remove short lines
                         if i - start_x > 50:
-                            cropped.append((model_robust, start_x, i, y[start_x], y[i]))
+                            # cropped.append((model_robust, start_x, i, y[start_x], y[i]))
+                            newLine = Line(start_x, i, y[start_x], y[i], model_robust)
+                            print 'gaga',newLine.x2, newLine.y2
+                            cropped.append(Line(start_x, i, y[start_x], y[i], model_robust))
                         start_x = x[i] + 5
                         i += 5
                 else:
@@ -124,7 +128,7 @@ def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
                     print 'line finished', i, i, y[start_x]
                     suspicious_count = 0
                     if x[i] - start_x > 100:
-                        cropped.append((model_robust, start_x, i-win_w, y[start_x], y[i-win_w]))
+                        cropped.append(Line(start_x, i-win_w, y[start_x], y[i-win_w], model_robust))
                     isLine = False
         else:
             if inliers_count:
@@ -138,7 +142,7 @@ def crop_lines(model_robust, skeleton, x, y, win_w, win_h):
                 suspicious_count = 0
         i+=1
     if isLine:
-        cropped.append((model_robust, start_x, x.shape-1, y[start_x], y[x.shape-1]))
+        cropped.append(Line(start_x, x.shape-1, y[start_x], y[x.shape-1], model_robust))
     return cropped
 
 def findIntersections(hor_lines, ver_lines):
@@ -177,49 +181,47 @@ def lineDetection(img):
             # hor_lines += [(model_robust, x1, y1)]
             cur_lines = crop_lines(model_robust, skeleton, x1, y1, 10, 10)
             figure('dd')
-            plt.scatter([x[1] for x in cur_lines], [x[3] for x in cur_lines], c="g")
-            plt.scatter([x[2] for x in cur_lines], [x[3] for x in cur_lines], c="r")
+            plt.scatter([x.x1 for x in cur_lines], [x.y1 for x in cur_lines], c="g")
+            plt.scatter([x.x2 for x in cur_lines], [x.y2 for x in cur_lines], c="r")
             hor_lines += cur_lines
         edge_pts_xy = edge_pts_xy[~inliers]
     plt.imshow(skeleton)
     return hor_lines, ver_lines
 
 def y_value(line):
-    return line[3]
+    return line.y1
 
 def x_start_value(line):
-    return line[1]
+    return line.x1
 
 def x_end_value(line):
-    return line[2]
+    return line.x2
 
 def areNeigbours(line1, line2):
     if not line1 or not line2:
         return False
-    x11 = x_start_value(line1)
-    x12 = x_end_value(line1)
-    x21 =  x_start_value(line2)
-    x22 = x_end_value(line2)
-    return np.abs(x11-x21) < 30 and np.abs(x12-x22) and np.abs(line1[3] - line2[3]) < 50
+    x11 = line1.x1
+    x12 = line1.x2
+    x21 = line2.x1
+    x22 = line2.x2
+    return np.abs(x11-x21) < 30 and np.abs(x12-x22) and np.abs(line1.y1 - line2.y1) < 50
 
 def special_x_sort(line):
-    x = x_start_value(line)
+    x = line.x1
     return int(math.ceil(x / 100.0)) * 100
 
 def find_parkings(img):
     hor_lines, ver_lines = lineDetection(img)
-    sorted_hor_lines = sorted(sorted(hor_lines, key=y_value), key=special_x_sort)
+    sorted_hor_lines = sorted(sorted(hor_lines, key=lambda x: x.y1), key=special_x_sort)
     parkings = []
     i=0
     prev_line = sorted_hor_lines[0]
-    prev_model = prev_line[0]
-    y_values = prev_model.predict_y([x_start_value(prev_line), x_end_value(prev_line)])
-    prev_points = [(x_start_value(prev_line), int(y_values[0])),(x_end_value(prev_line),int(y_values[1]))]
-    print sorted_hor_lines
+    prev_points = [(prev_line.x1, int(prev_line.y1)),(prev_line.x2,int(prev_line.y2))]
+    # print sorted_hor_lines
     while i<len(sorted_hor_lines):
         cur_line = sorted_hor_lines[i]
-        cur_x_start = x_start_value(cur_line)
-        cur_x_end = x_end_value(cur_line)
+        cur_x_start = cur_line.x1
+        cur_x_end = cur_line.x2
         if i < len(sorted_hor_lines) - 1:
             next_line = sorted_hor_lines[i+1]
             is_next_neig = areNeigbours(cur_line, next_line)
@@ -230,8 +232,8 @@ def find_parkings(img):
         # !is_prev_neig && !is_next_neig => not a parking!
         if is_prev_neig:
             if is_next_neig:
-                cur_x1 = statistics.median([prev_points[0][0],cur_x_start,x_start_value(next_line)])
-                cur_x2 = statistics.median([prev_points[1][0],cur_x_end,x_end_value(next_line)])
+                cur_x1 = statistics.median([prev_points[0][0],cur_x_start,next_line.x1])
+                cur_x2 = statistics.median([prev_points[1][0],cur_x_end,next_line.x2])
             else:
                 cur_x1 = cur_x_start if np.abs(prev_points[0][0]-cur_x_start) < 5  else prev_points[0][0]
                 cur_x2 = cur_x_end if np.abs(prev_points[1][0]-cur_x_start) < 5  else prev_points[1][0]
@@ -244,7 +246,7 @@ def find_parkings(img):
                 cur_x1 = -1000
                 cur_x2 = -1000
         if cur_line:
-            cur_points = [(cur_x1, int(cur_line[3])), (cur_x2, int(cur_line[4]))]
+            cur_points = [(cur_x1, int(cur_line.y1)), (cur_x2, int(cur_line.y2))]
         else:
             cur_points = [(cur_x1, -1000), (cur_x2, -1000)]
         if is_prev_neig:
