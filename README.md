@@ -1,7 +1,7 @@
 # parking-recongnition
 This repository contains my Bachelor's project for empty parking lot recognition from video footage
 
-#Pre-processing
+# Pre-processing
 Receives a folder of indicative sample photos from the selected parking lot (different days, hours, seasons etc.)
 
 # Post-processing
